@@ -12,7 +12,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -26,16 +25,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Check training notebook
+      - name: Run retraining
         run: |
-          python -m py_compile src/mlflow_tracking.py
-          python -m py_compile src/register_model.py
+          python src/retrain.py
 
-      - name: Retraining pipeline started
+      - name: Retraining completed
         run: |
-          echo "Loan Default model retraining pipeline started"
-          echo "Dataset change detected or workflow manually triggered"
-
-      - name: Retraining pipeline completed
-        run: |
-          echo "Loan Default MLOps retraining pipeline completed"
+          echo "Loan Default MLOps retraining completed successfully"
