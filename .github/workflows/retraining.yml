@@ -29,6 +29,12 @@ jobs:
         run: |
           python src/retrain.py
 
+      - name: Upload retrained model
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrained-loan-model
+          path: loan_models/random_forest_model.joblib
+
       - name: Retraining completed
         run: |
           echo "Loan Default MLOps retraining completed successfully"
