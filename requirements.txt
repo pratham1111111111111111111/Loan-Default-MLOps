@@ -2,7 +2,7 @@ fastapi
 uvicorn
 pandas
 numpy
-scikit-learn==1.9.0
+scikit-learn==1.6.1
 joblib
 mlflow
 pydantic

@@ -1,8 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 import pandas as pd
-import mlflow
-import mlflow.sklearn
+import joblib
 import os
 from datetime import datetime
 
@@ -13,65 +12,78 @@ from datetime import datetime
 
 app = FastAPI(
     title="Loan Default Prediction API",
-    description="ML API for predicting loan default using MLflow",
-    version="1.0.0"
+    description="Dockerized ML API for Loan Default Prediction",
+    version="2.0.0"
 )
 
 
 # ============================================================
-# MLFLOW CONFIGURATION
+# MODEL CONFIGURATION
 # ============================================================
 
-mlflow.set_tracking_uri("sqlite:///mlflow.db")
-
-MODEL_NAME = "Loan_Default_RandomForest"
-MODEL_VERSION = "1"
-
-MODEL_URI = f"models:/{MODEL_NAME}/{MODEL_VERSION}"
-
-
-# ============================================================
-# LOAD MODEL FROM MLFLOW MODEL REGISTRY
-# ============================================================
-
-print("=" * 60)
-print("LOADING MODEL FROM MLFLOW")
-print("=" * 60)
-
-print("Model Name:", MODEL_NAME)
-print("Model Version:", MODEL_VERSION)
-print("Model URI:", MODEL_URI)
-
-
-model = mlflow.sklearn.load_model(MODEL_URI)
-
-print("MLflow model loaded successfully")
-
-
-# ============================================================
-# LOAD FEATURE INFORMATION
-# ============================================================
-
+MODEL_PATH = "models/random_forest_model.joblib"
 FEATURE_PATH = "models/feature_columns.joblib"
 
-import joblib
-
+model = joblib.load(MODEL_PATH)
 feature_columns = joblib.load(FEATURE_PATH)
 
+print("=" * 60)
+print("LOAN DEFAULT MODEL LOADED")
+print("=" * 60)
+print("Model: Random Forest")
+print("Model path:", MODEL_PATH)
 print("Expected features:", len(feature_columns))
 
 
 # ============================================================
-# MONITORING CONFIGURATION
+# MONITORING
 # ============================================================
 
 MONITORING_DIR = "monitoring"
+
 PREDICTION_FILE = os.path.join(
     MONITORING_DIR,
     "predictions.csv"
 )
 
-os.makedirs(MONITORING_DIR, exist_ok=True)
+os.makedirs(
+    MONITORING_DIR,
+    exist_ok=True
+)
+
+
+def log_prediction(prediction, probability):
+
+    record = pd.DataFrame([{
+
+        "timestamp":
+            datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+
+        "prediction":
+            int(prediction),
+
+        "default_probability":
+            float(probability)
+
+    }])
+
+    if os.path.exists(PREDICTION_FILE):
+
+        record.to_csv(
+            PREDICTION_FILE,
+            mode="a",
+            header=False,
+            index=False
+        )
+
+    else:
+
+        record.to_csv(
+            PREDICTION_FILE,
+            index=False
+        )
 
 
 # ============================================================
@@ -107,106 +119,46 @@ class LoanApplication(BaseModel):
 def categorize_employment_stability(months):
 
     if months < 6:
-
         return "New Hire (Unstable)"
 
     elif months < 24:
-
         return "Moderately Stable"
 
     else:
-
         return "Highly Stable"
 
 
 def categorize_credit_score(score):
 
     if score < 580:
-
         return "Poor"
 
     elif score < 670:
-
         return "Fair"
 
     elif score < 740:
-
         return "Good"
 
     elif score < 800:
-
         return "Very Good"
 
     else:
-
         return "Excellent"
 
 
-def calculate_loan_to_income(loan_amount, income):
+def calculate_loan_to_income(
+    loan_amount,
+    income
+):
 
     if income == 0:
-
         return 0
 
     return loan_amount / income
 
 
 # ============================================================
-# SAVE PREDICTION FOR MONITORING
-# ============================================================
-
-def log_prediction(
-    prediction,
-    probability
-):
-
-    record = pd.DataFrame([{
-
-        "timestamp":
-            datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
-
-        "prediction":
-            int(prediction),
-
-        "default_probability":
-            float(probability)
-
-    }])
-
-
-    # --------------------------------------------------------
-    # Create file if it does not exist
-    # --------------------------------------------------------
-
-    if os.path.exists(PREDICTION_FILE):
-
-        record.to_csv(
-
-            PREDICTION_FILE,
-
-            mode="a",
-
-            header=False,
-
-            index=False
-
-        )
-
-    else:
-
-        record.to_csv(
-
-            PREDICTION_FILE,
-
-            index=False
-
-        )
-
-
-# ============================================================
-# HEALTH CHECK
+# HOME / HEALTH CHECK
 # ============================================================
 
 @app.get("/")
@@ -218,12 +170,12 @@ def home():
             "Loan Default Prediction API is running",
 
         "model":
-            MODEL_NAME,
+            "Random Forest",
 
-        "model_version":
-            MODEL_VERSION,
+        "deployment":
+            "Docker",
 
-        "features":
+        "feature_count":
             len(feature_columns)
 
     }
@@ -239,13 +191,10 @@ def model_info():
     return {
 
         "model":
-            MODEL_NAME,
+            "Random Forest",
 
-        "version":
-            MODEL_VERSION,
-
-        "model_uri":
-            MODEL_URI,
+        "model_file":
+            MODEL_PATH,
 
         "feature_count":
             len(feature_columns),
@@ -257,34 +206,28 @@ def model_info():
 
 
 # ============================================================
-# PREDICTION ENDPOINT
+# PREDICTION
 # ============================================================
 
 @app.post("/predict")
 def predict(application: LoanApplication):
 
-    # ========================================================
-    # CONVERT INPUT TO DICTIONARY
-    # ========================================================
+    # --------------------------------------------------------
+    # Convert input to dictionary
+    # --------------------------------------------------------
 
     data = application.model_dump()
-
-
-    # ========================================================
-    # CONVERT TO DATAFRAME
-    # ========================================================
 
     df = pd.DataFrame([data])
 
 
-    # ========================================================
-    # FEATURE ENGINEERING
-    # ========================================================
+    # --------------------------------------------------------
+    # Feature Engineering
+    # --------------------------------------------------------
 
     df["EmploymentStability"] = (
 
         df["MonthsEmployed"]
-
         .apply(
             categorize_employment_stability
         )
@@ -295,7 +238,6 @@ def predict(application: LoanApplication):
     df["CreditScoreCategory"] = (
 
         df["CreditScore"]
-
         .apply(
             categorize_credit_score
         )
@@ -320,23 +262,19 @@ def predict(application: LoanApplication):
     )
 
 
-    # ========================================================
-    # ONE-HOT ENCODING
-    # SAME METHOD USED DURING TRAINING
-    # ========================================================
+    # --------------------------------------------------------
+    # One-Hot Encoding
+    # --------------------------------------------------------
 
     df_encoded = pd.get_dummies(
-
         df,
-
         drop_first=True
-
     )
 
 
-    # ========================================================
-    # MATCH TRAINING FEATURES
-    # ========================================================
+    # --------------------------------------------------------
+    # Match Training Features
+    # --------------------------------------------------------
 
     df_encoded = df_encoded.reindex(
 
@@ -347,51 +285,40 @@ def predict(application: LoanApplication):
     )
 
 
-    # ========================================================
-    # ENSURE NUMERIC DATA
-    # ========================================================
+    # --------------------------------------------------------
+    # Convert to Numeric
+    # --------------------------------------------------------
 
     df_encoded = df_encoded.astype(float)
 
 
-    # ========================================================
-    # MODEL PREDICTION
-    # ========================================================
+    # --------------------------------------------------------
+    # Prediction
+    # --------------------------------------------------------
 
     prediction = model.predict(
-
         df_encoded
-
     )[0]
 
 
-    # ========================================================
-    # DEFAULT PROBABILITY
-    # ========================================================
-
     probability = model.predict_proba(
-
         df_encoded
-
     )[0][1]
 
 
-    # ========================================================
-    # LOG PREDICTION FOR MONITORING
-    # ========================================================
+    # --------------------------------------------------------
+    # Save Prediction
+    # --------------------------------------------------------
 
     log_prediction(
-
         prediction,
-
         probability
-
     )
 
 
-    # ========================================================
-    # RESULT
-    # ========================================================
+    # --------------------------------------------------------
+    # Result
+    # --------------------------------------------------------
 
     if prediction == 1:
 
@@ -402,9 +329,9 @@ def predict(application: LoanApplication):
         result = "No Loan Default"
 
 
-    # ========================================================
-    # API RESPONSE
-    # ========================================================
+    # --------------------------------------------------------
+    # Response
+    # --------------------------------------------------------
 
     return {
 
@@ -418,6 +345,12 @@ def predict(application: LoanApplication):
             round(
                 float(probability),
                 4
-            )
+            ),
+
+        "model":
+            "Random Forest",
+
+        "deployment":
+            "Docker"
 
     }
